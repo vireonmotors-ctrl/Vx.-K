@@ -1,181 +1,83 @@
 
 package com.vortex.smp
 
-import android.app.Activity
-import android.os.Bundle
-import android.content.Intent
+import android.content.Context
 import android.net.Uri
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
-import android.widget.Toast
 import java.io.File
+import java.util.zip.ZipInputStream
 
-class MainActivity : Activity() {
+object ZipImporter {
 
-    private lateinit var statusText: TextView
-    private lateinit var resultText: TextView
-    private var importedFolder: File? = null
+    fun importZip(context: Context, uri: Uri): File {
+        val destination = File(context.filesDir, "server")
 
-    companion object {
-        private const val REQUEST_ZIP = 1001
-    }
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(24, 24, 24, 24)
+        if (destination.exists()) {
+            destination.deleteRecursively()
         }
 
-        val title = TextView(this).apply {
-            text = "VORTEX SMP"
-            textSize = 28f
+        if (!destination.mkdirs()) {
+            throw Exception("Não foi possível criar a pasta do servidor.")
         }
 
-        statusText = TextView(this).apply {
-            text = "Importe seu servidor ZIP."
-            textSize = 16f
-        }
+        var entries = 0
+        var totalBytes = 0L
 
-        resultText = TextView(this).apply {
-            textSize = 15f
-        }
+        val input = context.contentResolver.openInputStream(uri)
+            ?: throw Exception("Não foi possível abrir o ZIP.")
 
-        fun addButton(label: String, action: () -> Unit) {
-            val button = Button(this).apply {
-                text = label
-                setOnClickListener { action() }
-            }
-            layout.addView(button)
-        }
+        input.use { source ->
+            ZipInputStream(source.buffered()).use { zip ->
 
-        layout.addView(title)
-        layout.addView(statusText)
+                var entry = zip.nextEntry
 
-        addButton("IMPORTAR SERVIDOR ZIP") {
-            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                addCategory(Intent.CATEGORY_OPENABLE)
-                type = "application/zip"
-            }
-            startActivityForResult(intent, REQUEST_ZIP)
-        }
+                while (entry != null) {
+                    entries++
 
-        addButton("VER PLUGINS") { showPlugins() }
-        addButton("VER MUNDOS") { showWorlds() }
-        addButton("VERIFICAR SERVIDOR") { showServer() }
+                    if (entries > 10000) {
+                        throw Exception("ZIP possui arquivos demais.")
+                    }
 
-        addButton("MEMÓRIA CONFIGURADA") {
-            resultText.text =
-                "Configuração desejada: -Xms1G -Xmx4G\n" +
-                "Isso não inicia o servidor nem garante 4 GB disponíveis."
-        }
+                    val outputFile = File(destination, entry.name)
+                    val safePath = destination.canonicalPath +
+                        File.separator
 
-        layout.addView(resultText)
+                    if (!outputFile.canonicalPath.startsWith(safePath)) {
+                        throw Exception("Caminho inválido no ZIP.")
+                    }
 
-        val scroll = ScrollView(this)
-        scroll.addView(layout)
-        setContentView(scroll)
-    }
+                    if (entry.isDirectory) {
+                        outputFile.mkdirs()
+                    } else {
+                        outputFile.parentFile?.mkdirs()
 
-    @Deprecated("Usa o seletor nativo do Android")
-    override fun onActivityResult(
-        requestCode: Int,
-        resultCode: Int,
-        data: Intent?
-    ) {
-        super.onActivityResult(requestCode, resultCode, data)
+                        outputFile.outputStream().buffered().use { output ->
+                            val buffer = ByteArray(8192)
 
-        if (requestCode == REQUEST_ZIP && resultCode == RESULT_OK) {
-            val uri: Uri = data?.data ?: return
+                            while (true) {
+                                val count = zip.read(buffer)
+                                if (count == -1) break
 
-            try {
-                val folder = ZipImporter.importZip(this, uri)
-                importedFolder = ServerManager.findServerRoot(folder)
+                                totalBytes += count
 
-                statusText.text = "ZIP importado com sucesso!"
-                showServer()
+                                if (totalBytes > 2L * 1024 * 1024 * 1024) {
+                                    throw Exception("ZIP maior que 2 GB extraídos.")
+                                }
 
-                Toast.makeText(
-                    this,
-                    "Servidor importado!",
-                    Toast.LENGTH_LONG
-                ).show()
+                                output.write(buffer, 0, count)
+                            }
+                        }
+                    }
 
-            } catch (e: Exception) {
-                statusText.text = "Erro: ${e.message}"
-            }
-        }
-    }
-
-    private fun showPlugins() {
-        val root = importedFolder
-
-        if (root == null) {
-            resultText.text = "Importe um ZIP primeiro."
-            return
-        }
-
-        val plugins = ServerManager.findPlugins(root)
-
-        resultText.text = if (plugins.isEmpty()) {
-            "Nenhum plugin .jar encontrado."
-        } else {
-            "PLUGINS ENCONTRADOS: ${plugins.size}\n\n" +
-                plugins.joinToString("\n") {
-                    it.name
+                    zip.closeEntry()
+                    entry = zip.nextEntry
                 }
-        }
-    }
-
-    private fun showWorlds() {
-        val root = importedFolder
-
-        if (root == null) {
-            resultText.text = "Importe um ZIP primeiro."
-            return
+            }
         }
 
-        val worlds = ServerManager.findWorlds(root)
-
-        resultText.text = if (worlds.isEmpty()) {
-            "Nenhum mundo com level.dat encontrado."
-        } else {
-            "MUNDOS ENCONTRADOS: ${worlds.size}\n\n" +
-                worlds.joinToString("\n") {
-                    it.absolutePath
-                }
-        }
-    }
-
-    private fun showServer() {
-        val root = importedFolder
-
-        if (root == null) {
-            resultText.text = "Nenhum servidor importado."
-            return
+        if (entries == 0) {
+            throw Exception("O ZIP está vazio.")
         }
 
-        val plugins = ServerManager.findPlugins(root)
-        val worlds = ServerManager.findWorlds(root)
-        val jars = ServerManager.findServerJars(root)
-
-        resultText.text = """
-            PASTA: ${root.absolutePath}
-
-            PLUGINS: ${plugins.size}
-            MUNDOS: ${worlds.size}
-            ARQUIVOS JAR: ${jars.size}
-
-            ARQUIVOS DO SERVIDOR:
-            ${jars.joinToString("\n") { it.name }.ifEmpty { "Nenhum encontrado" }}
-
-            Memória desejada: 4 GB
-
-            Esta versão identifica arquivos,
-            mas ainda não inicia o servidor.
-        """.trimIndent()
+        return destination
     }
 }
