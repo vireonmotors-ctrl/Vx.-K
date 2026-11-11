@@ -4,13 +4,12 @@ package com.vortex.smp
 import android.app.Activity
 import android.os.Bundle
 import android.content.Intent
+import android.net.Uri
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import android.net.Uri
-import androidx.activity.result.contract.ActivityResultContracts
 import java.io.File
 
 class MainActivity : Activity() {
@@ -19,26 +18,8 @@ class MainActivity : Activity() {
     private lateinit var resultText: TextView
     private var importedFolder: File? = null
 
-    private val zipPicker = registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            try {
-                val folder = ZipImporter.importZip(this, uri)
-                importedFolder = ServerManager.findServerRoot(folder)
-
-                statusText.text = "ZIP importado com sucesso!"
-                showServerContents()
-                Toast.makeText(
-                    this,
-                    "Servidor importado!",
-                    Toast.LENGTH_LONG
-                ).show()
-
-            } catch (e: Exception) {
-                statusText.text = "Erro ao importar ZIP: ${e.message}"
-            }
-        }
+    companion object {
+        private const val REQUEST_ZIP = 1001
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -46,7 +27,7 @@ class MainActivity : Activity() {
 
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(30, 30, 30, 30)
+            setPadding(24, 24, 24, 24)
         }
 
         val title = TextView(this).apply {
@@ -55,14 +36,12 @@ class MainActivity : Activity() {
         }
 
         statusText = TextView(this).apply {
-            text = "Importe seu servidor Minecraft ZIP."
+            text = "Importe seu servidor ZIP."
             textSize = 16f
-            setPadding(0, 20, 0, 20)
         }
 
         resultText = TextView(this).apply {
             textSize = 15f
-            setPadding(0, 20, 0, 20)
         }
 
         fun addButton(label: String, action: () -> Unit) {
@@ -77,26 +56,21 @@ class MainActivity : Activity() {
         layout.addView(statusText)
 
         addButton("IMPORTAR SERVIDOR ZIP") {
-            zipPicker.launch(
-                arrayOf("application/zip", "application/octet-stream", "*/*")
-            )
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "application/zip"
+            }
+            startActivityForResult(intent, REQUEST_ZIP)
         }
 
-        addButton("VER PLUGINS") {
-            showPlugins()
-        }
-
-        addButton("VER MUNDOS") {
-            showWorlds()
-        }
-
-        addButton("VERIFICAR SERVIDOR") {
-            showServerContents()
-        }
+        addButton("VER PLUGINS") { showPlugins() }
+        addButton("VER MUNDOS") { showWorlds() }
+        addButton("VERIFICAR SERVIDOR") { showServer() }
 
         addButton("MEMÓRIA CONFIGURADA") {
             resultText.text =
-                "Memória configurada:\n${ServerManager.memoryArgs().joinToString(" ")}\n\nA memória real depende da RAM disponível."
+                "Configuração desejada: -Xms1G -Xmx4G\n" +
+                "Isso não inicia o servidor nem garante 4 GB disponíveis."
         }
 
         layout.addView(resultText)
@@ -104,6 +78,36 @@ class MainActivity : Activity() {
         val scroll = ScrollView(this)
         scroll.addView(layout)
         setContentView(scroll)
+    }
+
+    @Deprecated("Usa o seletor nativo do Android")
+    override fun onActivityResult(
+        requestCode: Int,
+        resultCode: Int,
+        data: Intent?
+    ) {
+        super.onActivityResult(requestCode, resultCode, data)
+
+        if (requestCode == REQUEST_ZIP && resultCode == RESULT_OK) {
+            val uri: Uri = data?.data ?: return
+
+            try {
+                val folder = ZipImporter.importZip(this, uri)
+                importedFolder = ServerManager.findServerRoot(folder)
+
+                statusText.text = "ZIP importado com sucesso!"
+                showServer()
+
+                Toast.makeText(
+                    this,
+                    "Servidor importado!",
+                    Toast.LENGTH_LONG
+                ).show()
+
+            } catch (e: Exception) {
+                statusText.text = "Erro: ${e.message}"
+            }
+        }
     }
 
     private fun showPlugins() {
@@ -117,10 +121,12 @@ class MainActivity : Activity() {
         val plugins = ServerManager.findPlugins(root)
 
         resultText.text = if (plugins.isEmpty()) {
-            "Nenhum plugin .jar encontrado em pastas chamadas plugins."
+            "Nenhum plugin .jar encontrado."
         } else {
             "PLUGINS ENCONTRADOS: ${plugins.size}\n\n" +
-                plugins.joinToString("\n") { it.name }
+                plugins.joinToString("\n") {
+                    it.name
+                }
         }
     }
 
@@ -135,14 +141,16 @@ class MainActivity : Activity() {
         val worlds = ServerManager.findWorlds(root)
 
         resultText.text = if (worlds.isEmpty()) {
-            "Nenhum mundo Java com level.dat encontrado."
+            "Nenhum mundo com level.dat encontrado."
         } else {
             "MUNDOS ENCONTRADOS: ${worlds.size}\n\n" +
-                worlds.joinToString("\n") { it.absolutePath }
+                worlds.joinToString("\n") {
+                    it.absolutePath
+                }
         }
     }
 
-    private fun showServerContents() {
+    private fun showServer() {
         val root = importedFolder
 
         if (root == null) {
@@ -155,21 +163,19 @@ class MainActivity : Activity() {
         val jars = ServerManager.findServerJars(root)
 
         resultText.text = """
-            PASTA DO SERVIDOR:
-            ${root.absolutePath}
+            PASTA: ${root.absolutePath}
 
             PLUGINS: ${plugins.size}
             MUNDOS: ${worlds.size}
-            ARQUIVOS JAR DO SERVIDOR: ${jars.size}
+            ARQUIVOS JAR: ${jars.size}
 
             ARQUIVOS DO SERVIDOR:
             ${jars.joinToString("\n") { it.name }.ifEmpty { "Nenhum encontrado" }}
 
-            MEMÓRIA CONFIGURADA:
-            ${ServerManager.memoryArgs().joinToString(" ")}
+            Memória desejada: 4 GB
 
-            Observação: esta tela identifica os arquivos.
-            Ela ainda não inicia o servidor Minecraft.
+            Esta versão identifica arquivos,
+            mas ainda não inicia o servidor.
         """.trimIndent()
     }
 }
