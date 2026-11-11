@@ -1,28 +1,20 @@
 
 const express = require("express");
-
 const app = express();
 
 app.use(express.json());
 
 app.get("/", (req, res) => {
-    res.json({
-        name: "Vortex SMP",
-        status: "online",
-        memory: "4GB",
-        address: "play.vortexsmp.net"
-    });
+  res.json({
+    name: "Vortex SMP",
+    status: "configured",
+    address: "br-eco-23.reis.host",
+    javaPort: 25749,
+    bedrockPort: "AGUARDANDO_PORTA_GEYSER",
+    crossplay: true,
+    geyser: true,
+    floodgate: true
+  });
 });
 
-app.get("/status", (req, res) => {
-    res.json({
-        server: "Vortex SMP",
-        status: "API online"
-    });
-});
-
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-    console.log(`Vortex SMP API na porta ${PORT}`);
-});
+app.listen(process.env.PORT || 3000);
