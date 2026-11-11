@@ -3,32 +3,83 @@ package com.vortex.smp
 
 import java.io.File
 
-class ServerManager(private val directory: File) {
+object ServerManager {
 
-    fun serverExists(): Boolean {
-        return File(directory, "server.jar").exists()
+    // Procura arquivos e pastas em todas as subpastas.
+    private fun allFiles(root: File): Sequence<File> {
+        if (!root.exists() || !root.isDirectory) {
+            return emptySequence()
+        }
+
+        return root.walkTopDown()
+            .maxDepth(15)
+            .filter { it.exists() }
     }
 
-    fun findWorlds(): List<String> {
-        return directory.listFiles()
-            ?.filter {
-                it.isDirectory &&
-                File(it, "level.dat").exists()
+    // Encontra a pasta principal do servidor.
+    fun findServerRoot(importDir: File): File {
+        val folders = allFiles(importDir)
+            .filter { it.isDirectory }
+            .toList()
+
+        return folders.firstOrNull { folder ->
+            File(folder, "plugins").isDirectory &&
+            (
+                File(folder, "server.properties").exists() ||
+                File(folder, "bukkit.yml").exists() ||
+                File(folder, "paper.yml").exists() ||
+                File(folder, "purpur.yml").exists()
+            )
+        } ?: importDir
+    }
+
+    // Encontra plugins .jar dentro de pastas chamadas plugins.
+    fun findPlugins(root: File): List<File> {
+        return allFiles(root)
+            .filter {
+                it.isFile &&
+                it.extension.equals("jar", ignoreCase = true) &&
+                it.parentFile?.name.equals("plugins", ignoreCase = true)
             }
-            ?.map { it.name }
-            ?: emptyList()
+            .distinctBy { it.absolutePath }
+            .toList()
     }
 
-    fun findPlugins(): List<String> {
-        val folder = File(directory, "plugins")
-
-        return folder.listFiles()
-            ?.filter { it.isFile && it.extension == "jar" }
-            ?.map { it.name }
-            ?: emptyList()
+    // Encontra mundos Java pelo arquivo level.dat.
+    fun findWorlds(root: File): List<File> {
+        return allFiles(root)
+            .filter {
+                it.isFile &&
+                it.name.equals("level.dat", ignoreCase = true)
+            }
+            .mapNotNull { it.parentFile }
+            .distinctBy { it.absolutePath }
+            .toList()
     }
 
-    fun javaMemory(): String {
-        return "-Xms1G -Xmx4G"
+    // Procura os arquivos executáveis do servidor.
+    fun findServerJars(root: File): List<File> {
+        val serverNames = setOf(
+            "server.jar",
+            "paper.jar",
+            "spigot.jar",
+            "purpur.jar"
+        )
+
+        return allFiles(root)
+            .filter {
+                it.isFile &&
+                it.extension.equals("jar", ignoreCase = true) &&
+                it.name.lowercase() in serverNames
+            }
+            .toList()
+    }
+
+    fun hasServerJar(root: File): Boolean {
+        return findServerJars(root).isNotEmpty()
+    }
+
+    fun memoryArgs(): List<String> {
+        return listOf("-Xms1G", "-Xmx4G")
     }
 }
